@@ -11,6 +11,8 @@ func (h *Handler) Routes() stdhttp.Handler {
 		w.WriteHeader(stdhttp.StatusOK)
 		_, _ = w.Write([]byte(`{"result":"ok"}`))
 	})
+	mux.HandleFunc("GET /comments", h.GetComments)
+	mux.HandleFunc("DELETE /comments/{id}", h.DeleteComment)
 
 	return mux
 }

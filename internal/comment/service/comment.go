@@ -41,6 +41,49 @@ func (s *commentService) Create(ctx context.Context, parentID int64, text string
 	return s.repo.Create(ctx, parentID, text)
 }
 
+func (s *commentService) GetTreePage(ctx context.Context, parentID int64, page, limit int, sortMode model.Sort) (model.TreePage, error) {
+	if parentID < 0 {
+		return model.TreePage{}, ErrInvalidInput
+	}
+	if page <= 0 || limit <= 0 || limit > 100 {
+		return model.TreePage{}, ErrInvalidInput
+	}
+	if sortMode == "" {
+		sortMode = model.SortCreatedAtDesc
+	}
+	if sortMode != model.SortCreatedAtAsc && sortMode != model.SortCreatedAtDesc {
+		return model.TreePage{}, ErrInvalidInput
+	}
+
+	if parentID != 0 {
+		ok, err := s.repo.Exists(ctx, parentID)
+		if err != nil {
+			return model.TreePage{}, err
+		}
+		if !ok {
+			return model.TreePage{}, ErrNotFound
+		}
+	}
+
+	return s.repo.GetTreePage(ctx, parentID, page, limit, sortMode)
+}
+
+func (s *commentService) DeleteSubtree(ctx context.Context, id int64) (int, error) {
+	if id <= 0 {
+		return 0, ErrInvalidInput
+	}
+
+	ok, err := s.repo.Exists(ctx, id)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
+		return 0, ErrNotFound
+	}
+
+	return s.repo.DeleteSubtree(ctx, id)
+}
+
 func validateText(text string) error {
 	t := strings.TrimSpace(text)
 	if t == "" || len(t) > 2000 {
