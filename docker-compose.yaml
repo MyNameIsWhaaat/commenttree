@@ -1,0 +1,58 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: commenttree_postgres
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U commenttree -d commenttree"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - commenttree_network
+
+  migrate:
+    image: migrate/migrate
+    container_name: commenttree_migrate
+    volumes:
+      - ./migrations:/migrations
+    command: [
+      "-path", "/migrations",
+      "-database", "postgres://commenttree:commenttree@postgres:5432/commenttree?sslmode=disable",
+      "up"
+    ]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - commenttree_network
+    restart: on-failure:5
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_started
+    restart: unless-stopped
+    networks:
+      - commenttree_network
+
+volumes:
+  postgres_data:
+
+networks:
+  commenttree_network:
+    driver: bridge
