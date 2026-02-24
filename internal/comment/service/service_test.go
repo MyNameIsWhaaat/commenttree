@@ -28,7 +28,7 @@ func (f *fakeRepo) GetPath(ctx context.Context, id int64) ([]model.CommentPathIt
 
 func TestCreateValidation(t *testing.T) {
 	repo := &fakeRepo{inm.New()}
-	svc := New(repo)
+	svc := New(repo, nil)
 
 	_, err := svc.Create(context.Background(), 0, "   ")
 	if err == nil {
@@ -38,7 +38,7 @@ func TestCreateValidation(t *testing.T) {
 
 func TestCreateParentNotFound(t *testing.T) {
 	repo := &fakeRepo{inm.New()}
-	svc := New(repo)
+	svc := New(repo, nil)
 
 	_, err := svc.Create(context.Background(), 9999, "hello")
 	if err == nil {
@@ -49,7 +49,7 @@ func TestCreateParentNotFound(t *testing.T) {
 func TestCreateAndDeleteSubtree(t *testing.T) {
 	ctx := context.Background()
 	repo := &fakeRepo{inm.New()}
-	svc := New(repo)
+	svc := New(repo, nil)
 
 	root, err := svc.Create(ctx, 0, "root")
 	if err != nil {
@@ -86,7 +86,7 @@ func TestCreateAndDeleteSubtree(t *testing.T) {
 func TestGetTreePagePagination(t *testing.T) {
 	ctx := context.Background()
 	repo := &fakeRepo{inm.New()}
-	svc := New(repo)
+	svc := New(repo, nil)
 
 	// create 5 top-level comments
 	for i := 0; i < 5; i++ {

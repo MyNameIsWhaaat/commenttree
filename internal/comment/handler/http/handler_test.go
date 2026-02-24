@@ -35,7 +35,7 @@ func (f *fakeRepo) GetPath(ctx context.Context, id int64) ([]model.CommentPathIt
 
 func newServer() (*httptest.Server, *fakeRepo) {
 	repo := &fakeRepo{inm.New()}
-	svc := service.New(repo)
+	svc := service.New(repo, nil)
 	h := handler.New(svc)
 	srv := httptest.NewServer(h.Routes())
 	return srv, repo

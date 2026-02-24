@@ -46,12 +46,30 @@ services:
         condition: service_healthy
       migrate:
         condition: service_started
+      redis:
+        condition: service_started
     restart: unless-stopped
+    networks:
+      - commenttree_network
+
+  redis:
+    image: redis:7-alpine
+    container_name: commenttree_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
     networks:
       - commenttree_network
 
 volumes:
   postgres_data:
+  redis_data:
 
 networks:
   commenttree_network:
