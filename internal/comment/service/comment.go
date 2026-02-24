@@ -50,8 +50,17 @@ func (s *commentService) Create(ctx context.Context, parentID int64, text string
 	}
 
 	if s.rdb != nil {
+		_ = s.invalidateTreeCache(ctx, 0)
+
 		_ = s.invalidateTreeCache(ctx, parentID)
-		_ = s.invalidateSubtreeCache(ctx, parentID)
+
+		if parentID != 0 {
+			path, err := s.repo.GetPath(ctx, parentID)
+			if err == nil && len(path) > 0 {
+				rootID := path[0].ID
+				_ = s.invalidateSubtreeCache(ctx, rootID)
+			}
+		}
 	}
 	return c, nil
 }

@@ -19,6 +19,11 @@ func New(db *sql.DB) *Repo {
 	return &Repo{db: db}
 }
 
+type nodePtr struct {
+	c        model.Comment
+	children []*nodePtr
+}
+
 func (r *Repo) Exists(ctx context.Context, id int64) (bool, error) {
 	var one int
 	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM comments WHERE id=$1`, id).Scan(&one)
@@ -51,7 +56,6 @@ func (r *Repo) GetTreePage(ctx context.Context, parentID int64, page, limit int,
 	if sortMode == model.SortCreatedAtAsc {
 		order = "ASC"
 	}
-
 	offset := (page - 1) * limit
 
 	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
@@ -107,36 +111,30 @@ func (r *Repo) GetTreePage(ctx context.Context, parentID int64, page, limit int,
 	}
 	defer treeRows.Close()
 
-	nodes := make(map[int64]*model.CommentNode, 256)
+	nodes := make(map[int64]*nodePtr, 256)
 	for treeRows.Next() {
 		var c model.Comment
 		if err := treeRows.Scan(&c.ID, &c.ParentID, &c.Text, &c.CreatedAt); err != nil {
 			return model.TreePage{}, err
 		}
-		n := model.CommentNode{Comment: c}
-		nodes[c.ID] = &n
+		nodes[c.ID] = &nodePtr{c: c}
 	}
 	if err := treeRows.Err(); err != nil {
 		return model.TreePage{}, err
 	}
 
 	for _, n := range nodes {
-		if n.ParentID == 0 {
-			continue
-		}
-		if p, ok := nodes[n.ParentID]; ok {
-			p.Children = append(p.Children, *n)
+		if p, ok := nodes[n.c.ParentID]; ok && n.c.ParentID != 0 {
+			p.children = append(p.children, n)
 		}
 	}
 
 	items := make([]model.CommentNode, 0, len(roots))
 	for _, rid := range roots {
 		if n, ok := nodes[rid]; ok {
-			items = append(items, *n)
+			items = append(items, toValueTree(n, sortMode))
 		}
 	}
-
-	sortChildren(items, sortMode)
 
 	return model.TreePage{
 		Items: items,
@@ -144,24 +142,6 @@ func (r *Repo) GetTreePage(ctx context.Context, parentID int64, page, limit int,
 		Limit: limit,
 		Total: total,
 	}, nil
-}
-
-func sortChildren(nodes []model.CommentNode, sortMode model.Sort) {
-	less := func(a, b model.CommentNode) bool {
-		if sortMode == model.SortCreatedAtAsc {
-			return a.CreatedAt.Before(b.CreatedAt)
-		}
-		return a.CreatedAt.After(b.CreatedAt)
-	}
-
-	for i := range nodes {
-		if len(nodes[i].Children) > 0 {
-			sort.Slice(nodes[i].Children, func(a, b int) bool {
-				return less(nodes[i].Children[a], nodes[i].Children[b])
-			})
-			sortChildren(nodes[i].Children, sortMode)
-		}
-	}
 }
 
 func (r *Repo) DeleteSubtree(ctx context.Context, id int64) (int, error) {
@@ -320,12 +300,7 @@ func (r *Repo) GetPath(ctx context.Context, id int64) ([]model.CommentPathItem, 
 }
 
 func (r *Repo) GetSubtree(ctx context.Context, id int64, sortMode model.Sort) (model.CommentNode, error) {
-	order := "DESC"
-	if sortMode == model.SortCreatedAtAsc {
-		order = "ASC"
-	}
-
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := r.db.QueryContext(ctx, `
 		WITH RECURSIVE t AS (
 			SELECT id, parent_id, text, created_at
 			FROM comments
@@ -339,21 +314,19 @@ func (r *Repo) GetSubtree(ctx context.Context, id int64, sortMode model.Sort) (m
 		)
 		SELECT id, parent_id, text, created_at
 		FROM t
-		ORDER BY created_at %s
-	`, order), id)
+	`, id)
 	if err != nil {
 		return model.CommentNode{}, err
 	}
 	defer rows.Close()
 
-	nodes := make(map[int64]*model.CommentNode, 256)
+	nodes := make(map[int64]*nodePtr, 256)
 	for rows.Next() {
 		var c model.Comment
 		if err := rows.Scan(&c.ID, &c.ParentID, &c.Text, &c.CreatedAt); err != nil {
 			return model.CommentNode{}, err
 		}
-		n := model.CommentNode{Comment: c}
-		nodes[c.ID] = &n
+		nodes[c.ID] = &nodePtr{c: c}
 	}
 	if err := rows.Err(); err != nil {
 		return model.CommentNode{}, err
@@ -365,15 +338,33 @@ func (r *Repo) GetSubtree(ctx context.Context, id int64, sortMode model.Sort) (m
 	}
 
 	for _, n := range nodes {
-		if n.ID == id {
+		if n.c.ID == id {
 			continue
 		}
-		if p, ok := nodes[n.ParentID]; ok {
-			p.Children = append(p.Children, *n)
+		if p, ok := nodes[n.c.ParentID]; ok {
+			p.children = append(p.children, n)
 		}
 	}
 
-	sortChildren([]model.CommentNode{*root}, sortMode)
+	out := toValueTree(root, sortMode)
+	return out, nil
+}
 
-	return *root, nil
+func toValueTree(n *nodePtr, sortMode model.Sort) model.CommentNode {
+	out := model.CommentNode{Comment: n.c}
+
+	sort.Slice(n.children, func(i, j int) bool {
+		a := n.children[i].c.CreatedAt
+		b := n.children[j].c.CreatedAt
+		if sortMode == model.SortCreatedAtAsc {
+			return a.Before(b)
+		}
+		return a.After(b)
+	})
+
+	out.Children = make([]model.CommentNode, 0, len(n.children))
+	for _, ch := range n.children {
+		out.Children = append(out.Children, toValueTree(ch, sortMode))
+	}
+	return out
 }
