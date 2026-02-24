@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CommentTree</title>
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="wrap">
+    <header class="header">
+      <h1>CommentTree</h1>
+
+      <div class="row">
+        <input id="searchInput" type="text" placeholder="Поиск по комментариям..." />
+        <button id="searchBtn">Найти</button>
+        <button id="resetBtn" class="secondary">Сброс</button>
+      </div>
+
+      <div class="row">
+        <input id="newText" type="text" placeholder="Новый корневой комментарий..." />
+        <button id="createRootBtn">Добавить</button>
+      </div>
+
+      <div id="status" class="status"></div>
+    </header>
+
+    <main class="grid">
+      <section class="panel">
+        <div class="panelTitle">
+          <h2>Дерево</h2>
+          <div class="row small">
+            <label>sort:</label>
+            <select id="sortSelect">
+              <option value="created_at_desc">new → old</option>
+              <option value="created_at_asc">old → new</option>
+            </select>
+            <button id="reloadTreeBtn" class="secondary">Обновить</button>
+          </div>
+        </div>
+
+        <div id="tree" class="tree"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panelTitle">
+          <h2>Результаты поиска</h2>
+        </div>
+        <div id="results" class="results empty">Введите запрос и нажмите “Найти”.</div>
+      </section>
+    </main>
+  </div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

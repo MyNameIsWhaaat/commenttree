@@ -276,3 +276,104 @@ func (r *Repo) Search(ctx context.Context, q string, page, limit int, sortMode m
 		Total: total,
 	}, nil
 }
+
+func (r *Repo) GetPath(ctx context.Context, id int64) ([]model.CommentPathItem, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		WITH RECURSIVE p AS (
+			SELECT id, parent_id, text
+			FROM comments
+			WHERE id = $1
+			UNION ALL
+			SELECT c.id, c.parent_id, c.text
+			FROM comments c
+			JOIN p ON c.id = p.parent_id
+			WHERE p.parent_id <> 0
+		)
+		SELECT id, parent_id, text
+		FROM p
+	`, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var items []model.CommentPathItem
+	for rows.Next() {
+		var it model.CommentPathItem
+		if err := rows.Scan(&it.ID, &it.ParentID, &it.Text); err != nil {
+			return nil, err
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(items) == 0 {
+		return nil, sql.ErrNoRows
+	}
+
+	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
+		items[i], items[j] = items[j], items[i]
+	}
+
+	return items, nil
+}
+
+func (r *Repo) GetSubtree(ctx context.Context, id int64, sortMode model.Sort) (model.CommentNode, error) {
+	order := "DESC"
+	if sortMode == model.SortCreatedAtAsc {
+		order = "ASC"
+	}
+
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+		WITH RECURSIVE t AS (
+			SELECT id, parent_id, text, created_at
+			FROM comments
+			WHERE id = $1
+
+			UNION ALL
+
+			SELECT c.id, c.parent_id, c.text, c.created_at
+			FROM comments c
+			JOIN t ON c.parent_id = t.id
+		)
+		SELECT id, parent_id, text, created_at
+		FROM t
+		ORDER BY created_at %s
+	`, order), id)
+	if err != nil {
+		return model.CommentNode{}, err
+	}
+	defer rows.Close()
+
+	nodes := make(map[int64]*model.CommentNode, 256)
+	for rows.Next() {
+		var c model.Comment
+		if err := rows.Scan(&c.ID, &c.ParentID, &c.Text, &c.CreatedAt); err != nil {
+			return model.CommentNode{}, err
+		}
+		n := model.CommentNode{Comment: c}
+		nodes[c.ID] = &n
+	}
+	if err := rows.Err(); err != nil {
+		return model.CommentNode{}, err
+	}
+
+	root, ok := nodes[id]
+	if !ok {
+		return model.CommentNode{}, sql.ErrNoRows
+	}
+
+	for _, n := range nodes {
+		if n.ID == id {
+			continue
+		}
+		if p, ok := nodes[n.ParentID]; ok {
+			p.Children = append(p.Children, *n)
+		}
+	}
+
+	sortChildren([]model.CommentNode{*root}, sortMode)
+
+	return *root, nil
+}

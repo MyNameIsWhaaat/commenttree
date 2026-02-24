@@ -160,6 +160,55 @@ func (h *Handler) SearchComments(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	writeJSON(w, stdhttp.StatusOK, res)
 }
 
+func (h *Handler) GetPath(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	idStr := r.URL.Query().Get("id")
+	id, err := parseInt64(idStr)
+	if err != nil || id <= 0 {
+		writeJSON(w, stdhttp.StatusBadRequest, map[string]any{"error": "invalid id"})
+		return
+	}
+
+	items, err := h.svc.GetPath(r.Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidInput):
+			writeJSON(w, stdhttp.StatusBadRequest, map[string]any{"error": "invalid input"})
+		case errors.Is(err, service.ErrNotFound):
+			writeJSON(w, stdhttp.StatusNotFound, map[string]any{"error": "not found"})
+		default:
+			writeJSON(w, stdhttp.StatusInternalServerError, map[string]any{"error": "internal error"})
+		}
+		return
+	}
+	writeJSON(w, stdhttp.StatusOK, map[string]any{"items": items})
+}
+
+func (h *Handler) GetSubtree(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	idStr := r.URL.Query().Get("id")
+	id, err := parseInt64(idStr)
+	if err != nil || id <= 0 {
+		writeJSON(w, stdhttp.StatusBadRequest, map[string]any{"error": "invalid id"})
+		return
+	}
+
+	sortMode := model.Sort(r.URL.Query().Get("sort"))
+
+	node, err := h.svc.GetSubtree(r.Context(), id, sortMode)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidInput):
+			writeJSON(w, stdhttp.StatusBadRequest, map[string]any{"error": "invalid input"})
+		case errors.Is(err, service.ErrNotFound):
+			writeJSON(w, stdhttp.StatusNotFound, map[string]any{"error": "not found"})
+		default:
+			writeJSON(w, stdhttp.StatusInternalServerError, map[string]any{"error": "internal error"})
+		}
+		return
+	}
+
+	writeJSON(w, stdhttp.StatusOK, node)
+}
+
 func writeJSON(w stdhttp.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)

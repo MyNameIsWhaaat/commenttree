@@ -11,4 +11,6 @@ type CommentService interface {
 	GetTreePage(ctx context.Context, parentID int64, page, limit int, sort model.Sort) (model.TreePage, error)
 	DeleteSubtree(ctx context.Context, id int64) (deleted int, err error)
 	Search(ctx context.Context, q string, page, limit int, sort model.Sort) (model.SearchPage, error)
+	GetPath(ctx context.Context, id int64) ([]model.CommentPathItem, error)
+	GetSubtree(ctx context.Context, id int64, sort model.Sort) (model.CommentNode, error)
 }

@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 
@@ -99,6 +100,40 @@ func (s *commentService) Search(ctx context.Context, q string, page, limit int, 
 	}
 
 	return s.repo.Search(ctx, q, page, limit, sortMode)
+}
+
+func (s *commentService) GetPath(ctx context.Context, id int64) ([]model.CommentPathItem, error) {
+	if id <= 0 {
+		return nil, ErrInvalidInput
+	}
+	items, err := s.repo.GetPath(ctx, id)
+	if err == sql.ErrNoRows {
+		return nil, ErrNotFound
+	}
+	if err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+func (s *commentService) GetSubtree(ctx context.Context, id int64, sortMode model.Sort) (model.CommentNode, error) {
+	if id <= 0 {
+		return model.CommentNode{}, ErrInvalidInput
+	}
+	if sortMode == "" {
+		sortMode = model.SortCreatedAtDesc
+	}
+	if sortMode != model.SortCreatedAtAsc && sortMode != model.SortCreatedAtDesc {
+		return model.CommentNode{}, ErrInvalidInput
+	}
+	n, err := s.repo.GetSubtree(ctx, id, sortMode)
+	if err == sql.ErrNoRows {
+		return model.CommentNode{}, ErrNotFound
+	}
+	if err != nil {
+		return model.CommentNode{}, err
+	}
+	return n, nil
 }
 
 func validateText(text string) error {

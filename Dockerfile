@@ -15,6 +15,7 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates
 
 COPY --from=build /commenttree /app/commenttree
+COPY --from=build /app/web /app/web
 EXPOSE 8080
 
 ENTRYPOINT ["/app/commenttree"]
