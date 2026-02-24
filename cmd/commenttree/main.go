@@ -6,6 +6,8 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	commenthttp "github.com/MyNameIsWhaaat/commenttree/internal/comment/handler/http"
@@ -31,9 +33,13 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	
+	db.SetMaxOpenConns(10)
+	db.SetMaxIdleConns(10)
+	db.SetConnMaxLifetime(30 * time.Minute)
 
 	if err := db.Ping(); err != nil {
+		_ = db.Close()
 		log.Fatal(err)
 	}
 
@@ -51,6 +57,7 @@ func main() {
 		defer cancel()
 		if err := rdb.Ping(ctx).Err(); err != nil {
 			log.Printf("warning: redis not available: %v", err)
+			_ = rdb.Close()
 			rdb = nil
 		}
 	}
@@ -58,7 +65,45 @@ func main() {
 	svc := service.New(repo, rdb)
 	h := commenthttp.New(svc)
 
-	addr := ":" + port
-	log.Printf("listening on %s", addr)
-	log.Fatal(http.ListenAndServe(addr, h.Routes()))
+	srv := &http.Server{
+		Addr:              ":" + port,
+		Handler:           h.Routes(),
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+
+	errCh := make(chan error, 1)
+
+	go func() {
+		log.Printf("listening on %s", srv.Addr)
+		errCh <- srv.ListenAndServe()
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	select {
+	case sig := <-stop:
+		log.Printf("shutdown signal: %s", sig)
+	case err := <-errCh:
+		if err != nil && err != http.ErrServerClosed {
+			log.Printf("server error: %v", err)
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(ctx); err != nil {
+		log.Printf("http shutdown error: %v", err)
+	} else {
+		log.Printf("http server stopped")
+	}
+
+	if rdb != nil {
+		_ = rdb.Close()
+	}
+	_ = db.Close()
 }
