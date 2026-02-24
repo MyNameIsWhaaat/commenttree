@@ -12,8 +12,8 @@ import (
 type Repo struct {
 	mu sync.RWMutex
 
-	nextID int64
-	byID   map[int64]model.Comment
+	nextID   int64
+	byID     map[int64]model.Comment
 	children map[int64][]int64
 }
 
@@ -137,9 +137,7 @@ func (r *Repo) DeleteSubtree(ctx context.Context, id int64) (int, error) {
 
 		toDelete = append(toDelete, n)
 
-		for _, ch := range r.children[n] {
-			stack = append(stack, ch)
-		}
+		stack = append(stack, r.children[n]...)
 	}
 
 	for _, cid := range toDelete {

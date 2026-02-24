@@ -282,15 +282,6 @@ func (s *commentService) getVer(ctx context.Context, key string) int64 {
 	return 1
 }
 
-func (s *commentService) bumpVer(ctx context.Context, key string) {
-	if s.rdb == nil {
-		return
-	}
-
-	_ = s.rdb.Incr(ctx, key).Err()
-	_ = s.rdb.Expire(ctx, key, 24*time.Hour).Err()
-}
-
 func validateText(text string) error {
 	t := strings.TrimSpace(text)
 	if t == "" || len(t) > 2000 {
