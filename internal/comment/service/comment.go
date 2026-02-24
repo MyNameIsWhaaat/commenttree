@@ -84,6 +84,23 @@ func (s *commentService) DeleteSubtree(ctx context.Context, id int64) (int, erro
 	return s.repo.DeleteSubtree(ctx, id)
 }
 
+func (s *commentService) Search(ctx context.Context, q string, page, limit int, sortMode model.Sort) (model.SearchPage, error) {
+	if strings.TrimSpace(q) == "" {
+		return model.SearchPage{}, ErrInvalidInput
+	}
+	if page <= 0 || limit <= 0 || limit > 100 {
+		return model.SearchPage{}, ErrInvalidInput
+	}
+
+	switch sortMode {
+	case "", model.SortRankDesc, model.SortCreatedAtAsc, model.SortCreatedAtDesc:
+	default:
+		return model.SearchPage{}, ErrInvalidInput
+	}
+
+	return s.repo.Search(ctx, q, page, limit, sortMode)
+}
+
 func validateText(text string) error {
 	t := strings.TrimSpace(text)
 	if t == "" || len(t) > 2000 {

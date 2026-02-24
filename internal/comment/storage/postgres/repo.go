@@ -208,5 +208,71 @@ func (r *Repo) DeleteSubtree(ctx context.Context, id int64) (int, error) {
 }
 
 func (r *Repo) Search(ctx context.Context, q string, page, limit int, sortMode model.Sort) (model.SearchPage, error) {
-	return model.SearchPage{}, fmt.Errorf("not implemented")
+	var total int
+	if err := r.db.QueryRowContext(ctx, `
+		SELECT count(*)
+		FROM comments
+		WHERE search_tsv @@ plainto_tsquery('simple', $1)
+	`, q).Scan(&total); err != nil {
+		return model.SearchPage{}, err
+	}
+
+	if total == 0 {
+		return model.SearchPage{
+			Items: []model.SearchItem{},
+			Page:  page,
+			Limit: limit,
+			Total: 0,
+		}, nil
+	}
+
+	orderBy := `rank DESC, created_at DESC`
+	switch sortMode {
+	case "", model.SortRankDesc:
+	case model.SortCreatedAtDesc:
+		orderBy = `created_at DESC, rank DESC`
+	case model.SortCreatedAtAsc:
+		orderBy = `created_at ASC, rank DESC`
+	default:
+		orderBy = `rank DESC, created_at DESC`
+	}
+
+	offset := (page - 1) * limit
+
+	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+		SELECT
+			id,
+			parent_id,
+			ts_headline('simple', text, plainto_tsquery('simple', $1),
+				'StartSel=<mark>, StopSel=</mark>, MaxWords=20, MinWords=10, ShortWord=3, HighlightAll=true') AS snippet,
+			ts_rank(search_tsv, plainto_tsquery('simple', $1)) AS rank,
+			created_at
+		FROM comments
+		WHERE search_tsv @@ plainto_tsquery('simple', $1)
+		ORDER BY %s
+		LIMIT $2 OFFSET $3
+	`, orderBy), q, limit, offset)
+	if err != nil {
+		return model.SearchPage{}, err
+	}
+	defer rows.Close()
+
+	items := make([]model.SearchItem, 0, limit)
+	for rows.Next() {
+		var it model.SearchItem
+		if err := rows.Scan(&it.ID, &it.ParentID, &it.Snippet, &it.Rank, &it.CreatedAt); err != nil {
+			return model.SearchPage{}, err
+		}
+		items = append(items, it)
+	}
+	if err := rows.Err(); err != nil {
+		return model.SearchPage{}, err
+	}
+
+	return model.SearchPage{
+		Items: items,
+		Page:  page,
+		Limit: limit,
+		Total: total,
+	}, nil
 }

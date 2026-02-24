@@ -121,6 +121,45 @@ func (h *Handler) DeleteComment(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 	writeJSON(w, stdhttp.StatusOK, map[string]any{"deleted": deleted})
 }
 
+func (h *Handler) SearchComments(w stdhttp.ResponseWriter, r *stdhttp.Request) {
+	qp := r.URL.Query()
+
+	q := qp.Get("q")
+	page := 1
+	if v := qp.Get("page"); v != "" {
+		p, err := parseInt(v)
+		if err != nil {
+			writeJSON(w, stdhttp.StatusBadRequest, map[string]any{"error": "invalid page"})
+			return
+		}
+		page = p
+	}
+	limit := 20
+	if v := qp.Get("limit"); v != "" {
+		l, err := parseInt(v)
+		if err != nil {
+			writeJSON(w, stdhttp.StatusBadRequest, map[string]any{"error": "invalid limit"})
+			return
+		}
+		limit = l
+	}
+
+	sortMode := model.Sort(qp.Get("sort"))
+
+	res, err := h.svc.Search(r.Context(), q, page, limit, sortMode)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrInvalidInput):
+			writeJSON(w, stdhttp.StatusBadRequest, map[string]any{"error": "invalid input"})
+		default:
+			writeJSON(w, stdhttp.StatusInternalServerError, map[string]any{"error": "internal error"})
+		}
+		return
+	}
+
+	writeJSON(w, stdhttp.StatusOK, res)
+}
+
 func writeJSON(w stdhttp.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	w.WriteHeader(status)

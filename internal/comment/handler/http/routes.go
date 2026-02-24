@@ -13,6 +13,7 @@ func (h *Handler) Routes() stdhttp.Handler {
 	})
 	mux.HandleFunc("GET /comments", h.GetComments)
 	mux.HandleFunc("DELETE /comments/{id}", h.DeleteComment)
+	mux.HandleFunc("GET /comments/search", h.SearchComments)
 
 	return mux
 }
