@@ -5,6 +5,7 @@ import (
 	"errors"
 	stdhttp "net/http"
 	"strconv"
+	"strings"
 
 	"github.com/MyNameIsWhaaat/commenttree/internal/comment/model"
 	"github.com/MyNameIsWhaaat/commenttree/internal/comment/service"
@@ -98,7 +99,9 @@ func (h *Handler) GetComments(w stdhttp.ResponseWriter, r *stdhttp.Request) {
 }
 
 func (h *Handler) DeleteComment(w stdhttp.ResponseWriter, r *stdhttp.Request) {
-	idStr := r.PathValue("id")
+	// Expect path like /comments/{id}
+	p := strings.TrimPrefix(r.URL.Path, "/comments/")
+	idStr := strings.Trim(p, "/")
 	id, err := parseInt64(idStr)
 	if err != nil || id <= 0 {
 		writeJSON(w, stdhttp.StatusBadRequest, map[string]any{"error": "invalid id"})
