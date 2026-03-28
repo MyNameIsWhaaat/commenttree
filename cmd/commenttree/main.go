@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"database/sql"
-	"log"
 	"net/http"
 	"os"
 	"os/signal"
@@ -11,14 +10,15 @@ import (
 	"time"
 
 	commenthttp "github.com/MyNameIsWhaaat/commenttree/internal/comment/handler/http"
-
 	"github.com/MyNameIsWhaaat/commenttree/internal/comment/service"
 	"github.com/MyNameIsWhaaat/commenttree/internal/comment/storage/postgres"
-	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/redis/go-redis/v9"
+	"github.com/wb-go/wbf/zlog"
 )
 
 func main() {
+	zlog.InitConsole()
+
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
@@ -26,12 +26,12 @@ func main() {
 
 	dsn := os.Getenv("DATABASE_URL")
 	if dsn == "" {
-		log.Fatal("DATABASE_URL is required")
+		zlog.Logger.Fatal().Msg("DATABASE_URL is required")
 	}
 
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		log.Fatal(err)
+		zlog.Logger.Fatal().Err(err).Msg("failed to open database")
 	}
 
 	db.SetMaxOpenConns(10)
@@ -40,7 +40,7 @@ func main() {
 
 	if err := db.Ping(); err != nil {
 		_ = db.Close()
-		log.Fatal(err)
+		zlog.Logger.Fatal().Err(err).Msg("failed to ping database")
 	}
 
 	repo := postgres.New(db)
@@ -53,10 +53,12 @@ func main() {
 
 	if os.Getenv("REDIS_DISABLED") == "" {
 		rdb = redis.NewClient(&redis.Options{Addr: redisAddr})
+
 		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 		defer cancel()
+
 		if err := rdb.Ping(ctx).Err(); err != nil {
-			log.Printf("warning: redis not available: %v", err)
+			zlog.Logger.Warn().Err(err).Msg("redis not available")
 			_ = rdb.Close()
 			rdb = nil
 		}
@@ -77,19 +79,20 @@ func main() {
 	errCh := make(chan error, 1)
 
 	go func() {
-		log.Printf("listening on %s", srv.Addr)
+		zlog.Logger.Info().Str("addr", srv.Addr).Msg("server starting")
 		errCh <- srv.ListenAndServe()
 	}()
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	defer signal.Stop(stop)
 
 	select {
 	case sig := <-stop:
-		log.Printf("shutdown signal: %s", sig)
+		zlog.Logger.Info().Str("signal", sig.String()).Msg("shutdown signal received")
 	case err := <-errCh:
 		if err != nil && err != http.ErrServerClosed {
-			log.Printf("server error: %v", err)
+			zlog.Logger.Error().Err(err).Msg("server error")
 		}
 	}
 
@@ -97,9 +100,9 @@ func main() {
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
-		log.Printf("http shutdown error: %v", err)
+		zlog.Logger.Error().Err(err).Msg("http shutdown error")
 	} else {
-		log.Printf("http server stopped")
+		zlog.Logger.Info().Msg("http server stopped")
 	}
 
 	if rdb != nil {
