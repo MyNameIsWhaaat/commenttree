@@ -2,21 +2,50 @@ package postgres
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"sort"
-
-	_ "github.com/jackc/pgx/v5/stdlib"
+	"time"
 
 	"github.com/MyNameIsWhaaat/commenttree/internal/comment/model"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type Repo struct {
-	db *sql.DB
+	db *pgxpool.Pool
 }
 
-func New(db *sql.DB) *Repo {
+func New(db *pgxpool.Pool) *Repo {
 	return &Repo{db: db}
+}
+
+func NewFromDSN(ctx context.Context, dsn string) (*Repo, error) {
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("parse postgres config: %w", err)
+	}
+
+	cfg.MaxConns = 10
+	cfg.MinConns = 10
+	cfg.MaxConnLifetime = 30 * time.Minute
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("create pgx pool: %w", err)
+	}
+
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("ping postgres: %w", err)
+	}
+
+	return &Repo{db: pool}, nil
+}
+
+func (r *Repo) Close() {
+	if r.db != nil {
+		r.db.Close()
+	}
 }
 
 type nodePtr struct {
@@ -26,8 +55,8 @@ type nodePtr struct {
 
 func (r *Repo) Exists(ctx context.Context, id int64) (bool, error) {
 	var one int
-	err := r.db.QueryRowContext(ctx, `SELECT 1 FROM comments WHERE id=$1`, id).Scan(&one)
-	if err == sql.ErrNoRows {
+	err := r.db.QueryRow(ctx, `SELECT 1 FROM comments WHERE id=$1`, id).Scan(&one)
+	if err == pgx.ErrNoRows {
 		return false, nil
 	}
 	return err == nil, err
@@ -35,7 +64,7 @@ func (r *Repo) Exists(ctx context.Context, id int64) (bool, error) {
 
 func (r *Repo) Create(ctx context.Context, parentID int64, text string) (model.Comment, error) {
 	var c model.Comment
-	err := r.db.QueryRowContext(ctx, `
+	err := r.db.QueryRow(ctx, `
 		INSERT INTO comments(parent_id, text)
 		VALUES ($1, $2)
 		RETURNING id, parent_id, text, created_at
@@ -48,7 +77,7 @@ func (r *Repo) Create(ctx context.Context, parentID int64, text string) (model.C
 
 func (r *Repo) GetTreePage(ctx context.Context, parentID int64, page, limit int, sortMode model.Sort) (model.TreePage, error) {
 	var total int
-	if err := r.db.QueryRowContext(ctx, `SELECT count(*) FROM comments WHERE parent_id=$1`, parentID).Scan(&total); err != nil {
+	if err := r.db.QueryRow(ctx, `SELECT count(*) FROM comments WHERE parent_id=$1`, parentID).Scan(&total); err != nil {
 		return model.TreePage{}, err
 	}
 
@@ -58,7 +87,7 @@ func (r *Repo) GetTreePage(ctx context.Context, parentID int64, page, limit int,
 	}
 	offset := (page - 1) * limit
 
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT id
 		FROM comments
 		WHERE parent_id=$1
@@ -91,7 +120,7 @@ func (r *Repo) GetTreePage(ctx context.Context, parentID int64, page, limit int,
 		}, nil
 	}
 
-	treeRows, err := r.db.QueryContext(ctx, `
+	treeRows, err := r.db.Query(ctx, `
 		WITH RECURSIVE t AS (
 			SELECT id, parent_id, text, created_at
 			FROM comments
@@ -145,8 +174,7 @@ func (r *Repo) GetTreePage(ctx context.Context, parentID int64, page, limit int,
 }
 
 func (r *Repo) DeleteSubtree(ctx context.Context, id int64) (int, error) {
-	var deleted int
-	err := r.db.QueryRowContext(ctx, `
+	rows, err := r.db.Query(ctx, `
 		WITH RECURSIVE t AS (
 			SELECT id FROM comments WHERE id=$1
 			UNION ALL
@@ -154,42 +182,27 @@ func (r *Repo) DeleteSubtree(ctx context.Context, id int64) (int, error) {
 		)
 		DELETE FROM comments
 		WHERE id IN (SELECT id FROM t)
-		RETURNING 1
-	`, id).Scan(new(int))
-	if err == sql.ErrNoRows {
-		return 0, nil
-	}
+		RETURNING id
+	`, id)
 	if err != nil {
-		rows, qerr := r.db.QueryContext(ctx, `
-			WITH RECURSIVE t AS (
-				SELECT id FROM comments WHERE id=$1
-				UNION ALL
-				SELECT c.id FROM comments c JOIN t ON c.parent_id = t.id
-			)
-			DELETE FROM comments
-			WHERE id IN (SELECT id FROM t)
-			RETURNING id
-		`, id)
-		if qerr != nil {
-			return 0, qerr
-		}
-		defer rows.Close()
+		return 0, err
+	}
+	defer rows.Close()
 
-		for rows.Next() {
-			deleted++
-		}
-		if err := rows.Err(); err != nil {
-			return 0, err
-		}
-		return deleted, nil
+	deleted := 0
+	for rows.Next() {
+		deleted++
+	}
+	if err := rows.Err(); err != nil {
+		return 0, err
 	}
 
-	return 1, nil
+	return deleted, nil
 }
 
 func (r *Repo) Search(ctx context.Context, q string, page, limit int, sortMode model.Sort) (model.SearchPage, error) {
 	var total int
-	if err := r.db.QueryRowContext(ctx, `
+	if err := r.db.QueryRow(ctx, `
 		SELECT count(*)
 		FROM comments
 		WHERE search_tsv @@ plainto_tsquery('simple', $1)
@@ -219,7 +232,7 @@ func (r *Repo) Search(ctx context.Context, q string, page, limit int, sortMode m
 
 	offset := (page - 1) * limit
 
-	rows, err := r.db.QueryContext(ctx, fmt.Sprintf(`
+	rows, err := r.db.Query(ctx, fmt.Sprintf(`
 		SELECT
 			id,
 			parent_id,
@@ -258,7 +271,7 @@ func (r *Repo) Search(ctx context.Context, q string, page, limit int, sortMode m
 }
 
 func (r *Repo) GetPath(ctx context.Context, id int64) ([]model.CommentPathItem, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.Query(ctx, `
 		WITH RECURSIVE p AS (
 			SELECT id, parent_id, text
 			FROM comments
@@ -289,7 +302,7 @@ func (r *Repo) GetPath(ctx context.Context, id int64) ([]model.CommentPathItem, 
 		return nil, err
 	}
 	if len(items) == 0 {
-		return nil, sql.ErrNoRows
+		return nil, pgx.ErrNoRows
 	}
 
 	for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
@@ -300,7 +313,7 @@ func (r *Repo) GetPath(ctx context.Context, id int64) ([]model.CommentPathItem, 
 }
 
 func (r *Repo) GetSubtree(ctx context.Context, id int64, sortMode model.Sort) (model.CommentNode, error) {
-	rows, err := r.db.QueryContext(ctx, `
+	rows, err := r.db.Query(ctx, `
 		WITH RECURSIVE t AS (
 			SELECT id, parent_id, text, created_at
 			FROM comments
@@ -334,7 +347,7 @@ func (r *Repo) GetSubtree(ctx context.Context, id int64, sortMode model.Sort) (m
 
 	root, ok := nodes[id]
 	if !ok {
-		return model.CommentNode{}, sql.ErrNoRows
+		return model.CommentNode{}, pgx.ErrNoRows
 	}
 
 	for _, n := range nodes {

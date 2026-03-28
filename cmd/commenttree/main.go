@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"database/sql"
 	"net/http"
 	"os"
 	"os/signal"
@@ -13,6 +12,8 @@ import (
 	"github.com/MyNameIsWhaaat/commenttree/internal/comment/service"
 	"github.com/MyNameIsWhaaat/commenttree/internal/comment/storage/postgres"
 	"github.com/redis/go-redis/v9"
+	pgxdriver "github.com/wb-go/wbf/dbpg/pgx-driver"
+	wbflogger "github.com/wb-go/wbf/logger"
 	"github.com/wb-go/wbf/zlog"
 )
 
@@ -29,21 +30,29 @@ func main() {
 		zlog.Logger.Fatal().Msg("DATABASE_URL is required")
 	}
 
-	db, err := sql.Open("pgx", dsn)
+	appLogger, err := wbflogger.InitLogger(
+		wbflogger.ZerologEngine,
+		"commenttree",
+		"dev",
+	)
 	if err != nil {
-		zlog.Logger.Fatal().Err(err).Msg("failed to open database")
+		zlog.Logger.Fatal().Err(err).Msg("failed to init wbf logger")
 	}
 
-	db.SetMaxOpenConns(10)
-	db.SetMaxIdleConns(10)
-	db.SetConnMaxLifetime(30 * time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 
-	if err := db.Ping(); err != nil {
-		_ = db.Close()
+	pg, err := pgxdriver.New(dsn, appLogger)
+	if err != nil {
+		zlog.Logger.Fatal().Err(err).Msg("failed to connect to database")
+	}
+	defer pg.Close()
+
+	if err := pg.Ping(ctx); err != nil {
 		zlog.Logger.Fatal().Err(err).Msg("failed to ping database")
 	}
 
-	repo := postgres.New(db)
+	repo := postgres.New(pg.Pool)
 
 	var rdb *redis.Client
 	redisAddr := os.Getenv("REDIS_ADDR")
@@ -96,7 +105,7 @@ func main() {
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel = context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
 	if err := srv.Shutdown(ctx); err != nil {
@@ -108,5 +117,4 @@ func main() {
 	if rdb != nil {
 		_ = rdb.Close()
 	}
-	_ = db.Close()
 }
